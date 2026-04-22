@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>仰臥起坐挑戰 · 體感訓練</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      overflow: hidden;
+      background: #000;
+      width: 100vw;
+      height: 100vh;
+      color: #e2e8f0;
+    }
+
+    #video-bg {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      z-index: 0;
+    }
+
+    #game-canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    /* ── HUD ── */
+    #hud {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 28px;
+      background: linear-gradient(180deg, rgba(0,0,0,0.78) 0%, rgba(0,0,0,0) 100%);
+      pointer-events: none;
+    }
+
+    .hud-block { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+    .hud-label { font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: rgba(255,255,255,0.45); }
+    .hud-value { font-size: 26px; font-weight: 700; color: #fff; line-height: 1; }
+
+    #hud-count {
+      font-size: 64px; font-weight: 900;
+      background: linear-gradient(135deg, #fde68a, #f97316);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      line-height: 1;
+      text-shadow: none;
+      filter: drop-shadow(0 0 18px rgba(249,115,22,0.7));
+    }
+
+    #hud-timer {
+      font-size: 32px; font-weight: 700;
+      color: #67e8f9;
+      text-shadow: 0 0 16px rgba(103,232,249,0.8);
+    }
+    #hud-timer.urgent { color: #f87171; text-shadow: 0 0 16px rgba(248,113,113,0.9); animation: urgentPulse 0.5s infinite alternate; }
+    @keyframes urgentPulse { from { opacity: 1; } to { opacity: 0.5; } }
+
+    #hud-goal-badge {
+      background: linear-gradient(135deg, rgba(251,191,36,0.3), rgba(249,115,22,0.25));
+      border: 1px solid rgba(251,191,36,0.5);
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 14px; font-weight: 700;
+      color: #fde68a;
+      letter-spacing: 1px;
+      backdrop-filter: blur(8px);
+    }
+
+    /* ── side panel ── */
+    #side-panel {
+      position: fixed;
+      right: 20px; top: 50%;
+      transform: translateY(-50%);
+      z-index: 10;
+      width: 200px;
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(251,191,36,0.35);
+      border-radius: 20px;
+      padding: 18px 16px;
+      backdrop-filter: blur(12px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    #side-panel h3 {
+      font-size: 13px;
+      letter-spacing: 2px;
+      color: rgba(253,230,138,0.7);
+      text-transform: uppercase;
+    }
+
+    #side-canvas { width: 160px; height: 160px; }
+
+    #phase-label {
+      font-size: 15px; font-weight: 700;
+      color: #fde68a;
+      letter-spacing: 1px;
+    }
+
+    /* angle meter */
+    #angle-bar-wrap {
+      width: 100%;
+      background: rgba(255,255,255,0.1);
+      border-radius: 8px;
+      height: 14px;
+      overflow: hidden;
+    }
+    #angle-bar {
+      height: 100%;
+      border-radius: 8px;
+      width: 0%;
+      transition: width 0.1s, background 0.3s;
+    }
+    #angle-label { font-size: 12px; color: rgba(255,255,255,0.5); }
+
+    /* ── overlay screens ── */
+    .screen {
+      position: fixed; inset: 0;
+      z-index: 20;
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      gap: 20px;
+      background: rgba(0,0,0,0.82);
+      backdrop-filter: blur(6px);
+    }
+    .screen.hidden { display: none; }
+
+    .screen-title {
+      font-size: 52px; font-weight: 900;
+      background: linear-gradient(135deg, #fde68a, #f97316);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      filter: drop-shadow(0 0 24px rgba(249,115,22,0.6));
+      text-align: center;
+    }
+
+    .screen-sub {
+      font-size: 20px; color: rgba(255,255,255,0.7);
+      text-align: center; max-width: 520px; line-height: 1.7;
+    }
+
+    .btn {
+      padding: 14px 42px;
+      border: none; border-radius: 40px;
+      font-size: 18px; font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .btn:hover { transform: scale(1.06); }
+    .btn-primary {
+      background: linear-gradient(135deg, #f59e0b, #ef4444);
+      color: #fff;
+      box-shadow: 0 6px 30px rgba(245,158,11,0.45);
+    }
+    .btn-secondary {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+
+    /* level select grid */
+    #level-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 80px);
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .level-card {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(251,191,36,0.3);
+      border-radius: 14px;
+      padding: 10px 6px;
+      text-align: center;
+      cursor: pointer;
+      transition: transform 0.15s, background 0.15s, border-color 0.15s;
+    }
+    .level-card:hover { transform: scale(1.08); background: rgba(251,191,36,0.18); border-color: rgba(251,191,36,0.7); }
+    .level-card .lc-num { font-size: 22px; font-weight: 900; color: #fde68a; }
+    .level-card .lc-goal { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+    .level-card .lc-time { font-size: 11px; color: #67e8f9; }
+
+    /* finish screen */
+    #finish-count {
+      font-size: 96px; font-weight: 900;
+      background: linear-gradient(135deg, #fde68a, #f97316);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      filter: drop-shadow(0 0 32px rgba(249,115,22,0.8));
+      line-height: 1;
+    }
+    #finish-grade {
+      font-size: 26px; font-weight: 700;
+      padding: 8px 32px;
+      border-radius: 30px;
+    }
+    .grade-s { background: linear-gradient(135deg,#fde68a,#f59e0b); color: #000; }
+    .grade-a { background: linear-gradient(135deg,#86efac,#22c55e); color: #000; }
+    .grade-b { background: linear-gradient(135deg,#93c5fd,#3b82f6); color: #fff; }
+    .grade-c { background: rgba(255,255,255,0.2); color: #fff; }
+
+    /* countdown overlay */
+    #countdown-overlay {
+      position: fixed; inset: 0;
+      z-index: 15;
+      display: flex; justify-content: center; align-items: center;
+      pointer-events: none;
+    }
+    #countdown-num {
+      font-size: 200px; font-weight: 900;
+      color: #fde68a;
+      filter: drop-shadow(0 0 40px rgba(249,115,22,0.9));
+      opacity: 0;
+    }
+    @keyframes cdPop { 0%{opacity:1;transform:scale(1.5);} 80%{opacity:1;transform:scale(0.9);} 100%{opacity:0;transform:scale(0.8);} }
+
+    /* rep flash */
+    #rep-flash {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      font-size: 110px; font-weight: 900;
+      color: #fde68a;
+      pointer-events: none;
+      z-index: 12;
+      opacity: 0;
+      filter: drop-shadow(0 0 40px rgba(249,115,22,0.9));
+    }
+    @keyframes repPop { 0%{opacity:1;transform:translate(-50%,-50%) scale(1.4);} 80%{opacity:0.8;transform:translate(-50%,-50%) scale(0.95);} 100%{opacity:0;transform:translate(-50%,-50%) scale(0.8);} }
+
+    /* back link */
+    #back-link {
+      position: fixed; bottom: 18px; left: 24px;
+      z-index: 30;
+      color: rgba(255,255,255,0.45);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color 0.2s;
+    }
+    #back-link:hover { color: #fff; }
+  </style>
+</head>
+<body>
+
+<video id="video-bg" playsinline autoplay muted></video>
+<canvas id="game-canvas"></canvas>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="hud-block">
+    <span class="hud-label">Level</span>
+    <span class="hud-value" id="hud-level">1</span>
+  </div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:2px;">
+    <div id="hud-count">0</div>
+    <div id="hud-goal-badge">目標：10 下</div>
+  </div>
+  <div class="hud-block">
+    <span class="hud-label">Time</span>
+    <span id="hud-timer">60</span>
+  </div>
+</div>
+
+<!-- Side Panel -->
+<div id="side-panel">
+  <h3>即時狀態</h3>
+  <canvas id="side-canvas" width="160" height="160"></canvas>
+  <div id="phase-label">等待偵測</div>
+  <div id="angle-label">軀幹角度：—</div>
+  <div id="angle-bar-wrap"><div id="angle-bar"></div></div>
+</div>
+
+<!-- Rep Flash -->
+<div id="rep-flash">+1</div>
+
+<!-- Countdown Overlay -->
+<div id="countdown-overlay"><div id="countdown-num"></div></div>
+
+<!-- ── IDLE Screen ── -->
+<div id="idle-screen" class="screen">
+  <div class="screen-title">仰臥起坐挑戰</div>
+  <div class="screen-sub">用體感偵測你的仰臥起坐！<br>選擇關卡，在時間內完成目標次數。<br>側躺於鏡頭前，讓鏡頭看到你的全身側面。</div>
+  <div style="color:rgba(255,255,255,0.5);font-size:13px;letter-spacing:1px;">選擇關卡</div>
+  <div id="level-grid"></div>
+</div>
+
+<!-- ── FINISH Screen ── -->
+<div id="finish-screen" class="screen hidden">
+  <div class="screen-title" id="finish-title">完成！</div>
+  <div id="finish-count">0</div>
+  <div id="finish-grade" class="grade-s">S 級</div>
+  <div class="screen-sub" id="finish-msg"></div>
+  <div style="display:flex;gap:14px;">
+    <button class="btn btn-primary" id="btn-retry">再試一次</button>
+    <button class="btn btn-secondary" id="btn-menu">選關</button>
+  </div>
+</div>
+
+<a href="index.html" id="back-link">← 返回遊戲大廳</a>
+
+<script>
+// ══════════════════════════════════════════
+//  LEVELS CONFIG
+// ══════════════════════════════════════════
+const LEVELS = [
+  { id:1, goal:10, time:60,  label:'入門',   color:'#86efac' },
+  { id:2, goal:15, time:60,  label:'初級',   color:'#6ee7b7' },
+  { id:3, goal:20, time:60,  label:'中級',   color:'#67e8f9' },
+  { id:4, goal:25, time:60,  label:'中高級', color:'#a5f3fc' },
+  { id:5, goal:20, time:45,  label:'高強度', color:'#fde68a' },
+  { id:6, goal:30, time:60,  label:'進階',   color:'#fcd34d' },
+  { id:7, goal:25, time:40,  label:'高手',   color:'#f97316' },
+  { id:8, goal:35, time:60,  label:'精英',   color:'#ef4444' },
+];
+
+// ══════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════
+let gameState = 'idle'; // idle | countdown | playing | finish
+let currentLevel = LEVELS[0];
+let repCount = 0;
+let timeLeft = 60;
+let timerInterval = null;
+let sitPhase = 'down'; // down | up
+let lastLandmarks = null;
+
+// ══════════════════════════════════════════
+//  CANVAS SETUP
+// ══════════════════════════════════════════
+const canvas = document.getElementById('game-canvas');
+const ctx = canvas.getContext('2d');
+const sideCanvas = document.getElementById('side-canvas');
+const sideCtx = sideCanvas.getContext('2d');
+
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ══════════════════════════════════════════
+//  AUDIO
+// ══════════════════════════════════════════
+const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+function playTone(freq, type, duration, vol = 0.3, delay = 0) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain); gain.connect(audioCtx.destination);
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime + delay);
+  gain.gain.setValueAtTime(0, audioCtx.currentTime + delay);
+  gain.gain.linearRampToValueAtTime(vol, audioCtx.currentTime + delay + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + delay + duration);
+  osc.start(audioCtx.currentTime + delay);
+  osc.stop(audioCtx.currentTime + delay + duration + 0.01);
+}
+
+function sfxRep() {
+  playTone(600, 'sine', 0.08, 0.35);
+  playTone(900, 'sine', 0.12, 0.28, 0.06);
+}
+function sfxCountdown(n) {
+  playTone(n === 0 ? 880 : 440, 'square', 0.18, 0.25);
+}
+function sfxFinish() {
+  const notes = [523, 659, 784, 1047];
+  notes.forEach((f, i) => playTone(f, 'sine', 0.25, 0.35, i * 0.12));
+}
+function sfxUrgent() { playTone(660, 'square', 0.08, 0.2); }
+
+// ══════════════════════════════════════════
+//  BUILD LEVEL GRID
+// ══════════════════════════════════════════
+(function buildGrid() {
+  const grid = document.getElementById('level-grid');
+  LEVELS.forEach(lv => {
+    const card = document.createElement('div');
+    card.className = 'level-card';
+    card.innerHTML = `<div class="lc-num" style="color:${lv.color}">Lv${lv.id}</div>
+      <div class="lc-goal">${lv.goal} 下</div>
+      <div class="lc-time">${lv.time}s</div>`;
+    card.addEventListener('click', () => startCountdown(lv));
+    grid.appendChild(card);
+  });
+})();
+
+// ══════════════════════════════════════════
+//  COUNTDOWN → PLAY
+// ══════════════════════════════════════════
+function startCountdown(lv) {
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  currentLevel = lv;
+  document.getElementById('idle-screen').classList.add('hidden');
+  gameState = 'countdown';
+
+  const overlay = document.getElementById('countdown-num');
+  let n = 3;
+  function tick() {
+    overlay.style.animation = 'none';
+    overlay.textContent = n === 0 ? 'GO!' : n;
+    overlay.offsetHeight; // reflow
+    overlay.style.animation = 'cdPop 0.9s ease forwards';
+    sfxCountdown(n);
+    if (n === 0) {
+      setTimeout(() => { overlay.style.opacity = '0'; startGame(); }, 700);
+    } else {
+      n--;
+      setTimeout(tick, 900);
+    }
+  }
+  tick();
+}
+
+function startGame() {
+  gameState = 'playing';
+  repCount = 0;
+  timeLeft = currentLevel.time;
+  sitPhase = 'down';
+  updateHUD();
+  document.getElementById('hud-goal-badge').textContent = `目標：${currentLevel.goal} 下`;
+  document.getElementById('hud-level').textContent = currentLevel.id;
+
+  timerInterval = setInterval(() => {
+    if (gameState !== 'playing') return;
+    timeLeft--;
+    updateTimer();
+    if (timeLeft <= 5 && timeLeft > 0) sfxUrgent();
+    if (timeLeft <= 0) endGame();
+  }, 1000);
+}
+
+function updateHUD() {
+  document.getElementById('hud-count').textContent = repCount;
+}
+
+function updateTimer() {
+  const el = document.getElementById('hud-timer');
+  el.textContent = timeLeft;
+  el.classList.toggle('urgent', timeLeft <= 10);
+}
+
+// ══════════════════════════════════════════
+//  END GAME
+// ══════════════════════════════════════════
+function endGame() {
+  clearInterval(timerInterval);
+  gameState = 'finish';
+  sfxFinish();
+
+  const goal = currentLevel.goal;
+  const ratio = repCount / goal;
+  let grade, gradeClass, msg;
+  if (ratio >= 1.2)       { grade = 'S+ 超越目標！'; gradeClass = 'grade-s'; msg = `目標 ${goal} 下，你完成了 ${repCount} 下，太厲害了！`; }
+  else if (ratio >= 1.0)  { grade = 'S 完美達標';   gradeClass = 'grade-s'; msg = `恭喜完成目標 ${goal} 下！`; }
+  else if (ratio >= 0.8)  { grade = 'A 優秀';       gradeClass = 'grade-a'; msg = `完成 ${repCount} 下，差一點點就達標了！`; }
+  else if (ratio >= 0.6)  { grade = 'B 良好';       gradeClass = 'grade-b'; msg = `完成 ${repCount} 下，繼續練習！`; }
+  else                    { grade = 'C 繼續加油';   gradeClass = 'grade-c'; msg = `完成 ${repCount} 下，目標 ${goal} 下，不要放棄！`; }
+
+  document.getElementById('finish-count').textContent = repCount;
+  const gradeEl = document.getElementById('finish-grade');
+  gradeEl.textContent = grade;
+  gradeEl.className = `grade ${gradeClass}`;
+
+  const passed = repCount >= goal;
+  document.getElementById('finish-title').textContent = passed ? '🎉 挑戰成功！' : '⏱ 時間到！';
+  document.getElementById('finish-msg').textContent = msg;
+
+  // confetti if passed
+  if (passed) spawnConfetti();
+
+  document.getElementById('finish-screen').classList.remove('hidden');
+}
+
+document.getElementById('btn-retry').addEventListener('click', () => {
+  document.getElementById('finish-screen').classList.add('hidden');
+  startCountdown(currentLevel);
+});
+document.getElementById('btn-menu').addEventListener('click', () => {
+  document.getElementById('finish-screen').classList.add('hidden');
+  gameState = 'idle';
+  document.getElementById('idle-screen').classList.remove('hidden');
+});
+
+// ══════════════════════════════════════════
+//  CONFETTI PARTICLES
+// ══════════════════════════════════════════
+let confettiParticles = [];
+function spawnConfetti() {
+  confettiParticles = [];
+  const colors = ['#fde68a','#f97316','#ef4444','#6ee7b7','#67e8f9','#a78bfa'];
+  for (let i = 0; i < 120; i++) {
+    confettiParticles.push({
+      x: Math.random() * canvas.width,
+      y: -20,
+      vx: (Math.random() - 0.5) * 4,
+      vy: 2 + Math.random() * 4,
+      rot: Math.random() * Math.PI * 2,
+      vrot: (Math.random() - 0.5) * 0.2,
+      w: 8 + Math.random() * 8,
+      h: 4 + Math.random() * 5,
+      color: colors[Math.floor(Math.random() * colors.length)],
+      life: 1,
+    });
+  }
+}
+
+function updateConfetti() {
+  if (confettiParticles.length === 0) return;
+  confettiParticles.forEach(p => {
+    p.x += p.vx; p.y += p.vy; p.rot += p.vrot;
+    p.vy += 0.08;
+    if (p.y > canvas.height + 30) p.life = 0;
+  });
+  confettiParticles = confettiParticles.filter(p => p.life > 0);
+}
+
+function drawConfetti() {
+  confettiParticles.forEach(p => {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rot);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+    ctx.restore();
+  });
+}
+
+// ══════════════════════════════════════════
+//  POSE LOGIC — angle utilities
+// ══════════════════════════════════════════
+function angle2D(a, b, c) {
+  // angle at vertex b
+  const ab = [a.x - b.x, a.y - b.y];
+  const cb = [c.x - b.x, c.y - b.y];
+  const dot = ab[0]*cb[0] + ab[1]*cb[1];
+  const mag = Math.sqrt((ab[0]**2+ab[1]**2)) * Math.sqrt((cb[0]**2+cb[1]**2));
+  if (mag === 0) return 0;
+  return Math.acos(Math.max(-1, Math.min(1, dot/mag))) * 180 / Math.PI;
+}
+
+// Sit-up detection:
+// We measure the hip angle: shoulder - hip - knee
+// DOWN (lying flat): angle ≈ 160-180°
+// UP (sitting up):  angle ≈ 60-100°
+const DOWN_THRESHOLD = 145; // above this → lying down
+const UP_THRESHOLD   = 110; // below this → sitting up
+
+function processPose(landmarks) {
+  if (!landmarks || landmarks.length < 33) return;
+
+  // Use left or right side — pick the side more visible (higher z confidence)
+  // MediaPipe Pose: 11=left_shoulder, 12=right_shoulder,
+  // 23=left_hip, 24=right_hip, 25=left_knee, 26=right_knee
+  const lShoulder = landmarks[11], rShoulder = landmarks[12];
+  const lHip = landmarks[23], rHip = landmarks[24];
+  const lKnee = landmarks[25], rKnee = landmarks[26];
+
+  // Pick side with higher visibility
+  const useLeft = (lHip.visibility || 0) >= (rHip.visibility || 0);
+  const shoulder = useLeft ? lShoulder : rShoulder;
+  const hip      = useLeft ? lHip      : rHip;
+  const knee     = useLeft ? lKnee     : rKnee;
+
+  // Check all landmarks are sufficiently visible
+  const minVis = 0.4;
+  if ((shoulder.visibility || 0) < minVis || (hip.visibility || 0) < minVis || (knee.visibility || 0) < minVis) {
+    updatePhaseLabel('偵測中…', '#999');
+    updateAngleBar(0, '#555');
+    drawSideStick(landmarks, 0, 0);
+    return;
+  }
+
+  const hipAngle = angle2D(shoulder, hip, knee);
+
+  // normalize 0-1 for bar (60° → 0, 180° → 1)
+  const barRatio = Math.max(0, Math.min(1, (hipAngle - 60) / 120));
+  const barColor = hipAngle < UP_THRESHOLD ? '#6ee7b7' :
+                   hipAngle > DOWN_THRESHOLD ? '#f97316' : '#fde68a';
+  updateAngleBar(barRatio, barColor);
+  document.getElementById('angle-label').textContent = `髖關節角度：${Math.round(hipAngle)}°`;
+
+  // State machine
+  if (gameState === 'playing') {
+    if (sitPhase === 'down' && hipAngle < UP_THRESHOLD) {
+      sitPhase = 'up';
+      updatePhaseLabel('⬆ 起身', '#6ee7b7');
+    } else if (sitPhase === 'up' && hipAngle > DOWN_THRESHOLD) {
+      sitPhase = 'down';
+      repCount++;
+      updateHUD();
+      sfxRep();
+      showRepFlash();
+      updatePhaseLabel('⬇ 躺下', '#f97316');
+      if (repCount >= currentLevel.goal) { endGame(); }
+    } else if (sitPhase === 'down') {
+      updatePhaseLabel('⬇ 躺下', '#f97316');
+    } else {
+      updatePhaseLabel('⬆ 起身', '#6ee7b7');
+    }
+  }
+
+  drawSideStick(landmarks, hipAngle, barRatio);
+}
+
+function updatePhaseLabel(text, color) {
+  const el = document.getElementById('phase-label');
+  el.textContent = text;
+  el.style.color = color;
+}
+
+function updateAngleBar(ratio, color) {
+  const bar = document.getElementById('angle-bar');
+  bar.style.width = `${Math.round(ratio * 100)}%`;
+  bar.style.background = color;
+}
+
+function showRepFlash() {
+  const el = document.getElementById('rep-flash');
+  el.style.animation = 'none';
+  el.offsetHeight;
+  el.style.animation = 'repPop 0.55s ease forwards';
+}
+
+// ── draw stick figure on side canvas ──
+function drawSideStick(landmarks, hipAngle, barRatio) {
+  const W = 160, H = 160;
+  sideCtx.clearRect(0, 0, W, H);
+
+  // background
+  sideCtx.fillStyle = 'rgba(0,0,0,0.4)';
+  sideCtx.roundRect(0, 0, W, H, 12);
+  sideCtx.fill();
+
+  if (!landmarks || landmarks.length < 33) return;
+
+  // Project landmarks to side canvas (mirror x, scale)
+  function proj(lm) {
+    return {
+      x: (1 - lm.x) * W,
+      y: lm.y * H,
+    };
+  }
+
+  const color = hipAngle < UP_THRESHOLD ? '#6ee7b7' :
+                hipAngle > DOWN_THRESHOLD ? '#f97316' : '#fde68a';
+
+  const pairs = [
+    [11,12],[11,13],[13,15],[12,14],[14,16],
+    [11,23],[12,24],[23,24],
+    [23,25],[25,27],[24,26],[26,28],
+  ];
+
+  sideCtx.strokeStyle = color;
+  sideCtx.lineWidth = 3;
+  sideCtx.lineCap = 'round';
+
+  pairs.forEach(([a, b]) => {
+    const pa = proj(landmarks[a]), pb = proj(landmarks[b]);
+    sideCtx.beginPath();
+    sideCtx.moveTo(pa.x, pa.y);
+    sideCtx.lineTo(pb.x, pb.y);
+    sideCtx.stroke();
+  });
+
+  // head
+  const nose = proj(landmarks[0]);
+  sideCtx.beginPath();
+  sideCtx.arc(nose.x, nose.y, 7, 0, Math.PI * 2);
+  sideCtx.fillStyle = color;
+  sideCtx.fill();
+}
+
+// ══════════════════════════════════════════
+//  SKELETON DRAW ON MAIN CANVAS
+// ══════════════════════════════════════════
+const POSE_CONNECTIONS = [
+  [0,1],[1,2],[2,3],[3,7],[0,4],[4,5],[5,6],[6,8],
+  [9,10],[11,12],[11,13],[13,15],[15,17],[17,19],[19,15],[15,21],
+  [12,14],[14,16],[16,18],[18,20],[20,16],[16,22],
+  [11,23],[12,24],[23,24],
+  [23,25],[25,27],[27,29],[29,31],[31,27],
+  [24,26],[26,28],[28,30],[30,32],[32,28],
+];
+
+function drawSkeletonOnMain(landmarks) {
+  if (!landmarks || gameState === 'idle') return;
+
+  const W = canvas.width, H = canvas.height;
+
+  function toCanvas(lm) {
+    return { x: (1 - lm.x) * W, y: lm.y * H };
+  }
+
+  const hipAngle = (() => {
+    const useLeft = (landmarks[23].visibility || 0) >= (landmarks[24].visibility || 0);
+    return angle2D(
+      useLeft ? landmarks[11] : landmarks[12],
+      useLeft ? landmarks[23] : landmarks[24],
+      useLeft ? landmarks[25] : landmarks[26],
+    );
+  })();
+
+  const color = hipAngle < UP_THRESHOLD ? '#6ee7b7' :
+                hipAngle > DOWN_THRESHOLD ? '#f97316' : '#fde68a';
+
+  POSE_CONNECTIONS.forEach(([a, b]) => {
+    if (a >= landmarks.length || b >= landmarks.length) return;
+    const pa = toCanvas(landmarks[a]), pb = toCanvas(landmarks[b]);
+    const visA = landmarks[a].visibility || 0;
+    const visB = landmarks[b].visibility || 0;
+    if (visA < 0.35 && visB < 0.35) return;
+    ctx.save();
+    ctx.globalAlpha = Math.min(visA, visB) * 0.85 + 0.1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.moveTo(pa.x, pa.y);
+    ctx.lineTo(pb.x, pb.y);
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // joints
+  [0,11,12,13,14,15,16,23,24,25,26,27,28].forEach(i => {
+    if (i >= landmarks.length) return;
+    const vis = landmarks[i].visibility || 0;
+    if (vis < 0.35) return;
+    const p = toCanvas(landmarks[i]);
+    ctx.save();
+    ctx.globalAlpha = vis * 0.9;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, i === 0 ? 8 : 5, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 12;
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
+// ══════════════════════════════════════════
+//  MAIN RENDER LOOP
+// ══════════════════════════════════════════
+function renderLoop() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (lastLandmarks) {
+    drawSkeletonOnMain(lastLandmarks);
+  }
+  drawConfetti();
+  updateConfetti();
+  requestAnimationFrame(renderLoop);
+}
+renderLoop();
+
+// ══════════════════════════════════════════
+//  MEDIAPIPE POSE SETUP
+// ══════════════════════════════════════════
+const videoEl = document.getElementById('video-bg');
+
+const pose = new Pose({
+  locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+});
+pose.setOptions({
+  modelComplexity: 1,
+  smoothLandmarks: true,
+  enableSegmentation: false,
+  smoothSegmentation: false,
+  minDetectionConfidence: 0.55,
+  minTrackingConfidence: 0.55,
+});
+pose.onResults(results => {
+  lastLandmarks = results.poseLandmarks || null;
+  if (lastLandmarks) processPose(lastLandmarks);
+  drawSideStick(lastLandmarks, 0, 0);
+});
+
+const camera = new Camera(videoEl, {
+  onFrame: async () => { await pose.send({ image: videoEl }); },
+  width: 1280,
+  height: 720,
+});
+camera.start().catch(err => {
+  alert('無法開啟攝像頭：' + err.message);
+});
+</script>
+</body>
+</html>
